@@ -1,0 +1,3 @@
+INSERT INTO `reader_account` (`reader_id`, `username`, `password_hash`, `email`, `status`, `created_at`, `updated_at`) VALUES (1, 'r001', '<BCRYPT_HASH_r001123>', 'r001@demo.test', 1, '2026-01-15 18:22:12', '2026-01-15 18:22:12');
+INSERT INTO `reader_account` (`reader_id`, `username`, `password_hash`, `email`, `status`, `created_at`, `updated_at`) VALUES (2, 'r002', '<BCRYPT_HASH_r002123>', 'r002@demo.test', 1, '2026-01-15 18:22:12', '2026-01-15 18:22:12');
+INSERT INTO `reader_account` (`reader_id`, `username`, `password_hash`, `email`, `status`, `created_at`, `updated_at`) VALUES (3, 't001', '<BCRYPT_HASH_t001123>', 't001@demo.test', 1, '2026-01-15 18:22:12', '2026-01-15 18:22:12');

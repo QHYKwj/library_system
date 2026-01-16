@@ -1,0 +1,2 @@
+INSERT INTO `staff_user` (`staff_id`, `username`, `password_hash`, `role`, `email`, `phone`, `status`, `created_at`, `updated_at`) VALUES (1, 'admin', '<BCRYPT_HASH_admin123>', 'admin', 'admin@library.test', '13800000001', 1, '2026-01-15 18:22:12', '2026-01-15 18:37:19');
+INSERT INTO `staff_user` (`staff_id`, `username`, `password_hash`, `role`, `email`, `phone`, `status`, `created_at`, `updated_at`) VALUES (2, 'librarian1', 'lib123', 'librarian', 'lib1@library.test', '13800000002', 1, '2026-01-15 18:22:12', '2026-01-15 18:22:55');

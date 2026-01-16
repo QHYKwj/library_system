@@ -1,0 +1,1305 @@
+<!doctype html>
+<html lang="zh" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>图书馆管理系统</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            mint: {
+              50: '#F6FFF8',
+              100: '#E9FBEF',
+              200: '#CFF5DC',
+              300: '#AEECC4',
+              400: '#7BC96F',
+              500: '#4CAF50',
+              600: '#2F8F46',
+              700: '#1F6D36',
+              800: '#164E2A',
+              900: '#0F2F1B',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Vue3 + Router + Axios -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.6.8/dist/axios.min.js"></script>
+
+  <!-- Algolia -->
+  <script src="https://cdn.jsdelivr.net/npm/algoliasearch@4.23.3/dist/algoliasearch-lite.umd.js"></script>
+
+  <style>
+    .lift {
+      transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+    }
+    .lift:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0,0,0,.08); }
+    .lift:active { transform: translateY(0px) scale(0.99); filter: brightness(.98); }
+
+    .glass {
+      background: rgba(255,255,255,.7);
+      backdrop-filter: blur(12px);
+    }
+    .dark .glass {
+      background: rgba(17, 24, 39, .55);
+    }
+  </style>
+</head>
+
+<body class="h-full bg-mint-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100">
+<div id="app" class="min-h-full"></div>
+
+<script>
+/** =========================
+ *  配置区：你只要改这里
+ *  ========================= */
+const CONFIG = {
+  API_BASE: "http://127.0.0.1:8000",
+  ALGOLIA: {
+    APP_ID: "9Q4KPXBNUL",            // 填你的 Algolia App ID
+    SEARCH_ONLY_KEY: "1f3cbccbdbf725fc68e4cb9d6192e797",   // 填 Search-Only Key（前端可用）
+    INDEX: "book_index"
+  }
+};
+
+/** =========================
+ *  Axios 封装
+ *  ========================= */
+const api = axios.create({
+  baseURL: CONFIG.API_BASE,
+  timeout: 10000
+});
+api.interceptors.request.use((cfg) => {
+  const token = localStorage.getItem("token");
+  if (token) cfg.headers.Authorization = "Bearer " + token;
+  return cfg;
+});
+
+/** =========================
+ *  小工具：Toast
+ *  ========================= */
+const ToastBus = Vue.reactive({ list: [] });
+function toast(msg, type="info") {
+  const id = Math.random().toString(16).slice(2);
+  ToastBus.list.push({ id, msg, type });
+  setTimeout(()=> {
+    ToastBus.list = ToastBus.list.filter(x => x.id !== id);
+  }, 2600);
+}
+
+/** =========================
+ *  Auth Store（极简）
+ *  ========================= */
+const Auth = Vue.reactive({
+  username: localStorage.getItem("username") || "",
+  role: localStorage.getItem("role") || "",
+  reader_id: localStorage.getItem("reader_id") || "",
+  token: localStorage.getItem("token") || "",
+  isAuthed() { return !!this.token; },
+  setAuth(t) {
+    this.token = t.access_token;
+    this.role = t.role;
+    this.username = t.username;
+    this.reader_id = t.reader_id ?? "";
+    localStorage.setItem("token", this.token);
+    localStorage.setItem("role", this.role);
+    localStorage.setItem("username", this.username);
+    localStorage.setItem("reader_id", this.reader_id);
+  },
+  logout() {
+    this.username=""; this.role=""; this.reader_id=""; this.token="";
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("username");
+    localStorage.removeItem("reader_id");
+  }
+});
+
+/** =========================
+ *  Dark/Light Theme
+ *  ========================= */
+const Theme = Vue.reactive({
+  dark: (localStorage.getItem("dark") === "1"),
+  apply() {
+    document.documentElement.classList.toggle("dark", this.dark);
+    localStorage.setItem("dark", this.dark ? "1" : "0");
+  }
+});
+Theme.apply();
+
+/** =========================
+ *  UI Components
+ *  ========================= */
+const AppShell = {
+  template: `
+  <div>
+    <header class="sticky top-0 z-30 border-b border-mint-200/70 dark:border-slate-800 bg-white/70 dark:bg-slate-950/70 backdrop-blur">
+      <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <div class="w-9 h-9 rounded-xl bg-mint-200 dark:bg-slate-800 flex items-center justify-center">📚</div>
+          <div>
+            <div class="font-semibold leading-tight">图书馆管理系统</div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 leading-tight">
+              {{ Auth.role ? (Auth.role==='reader'?'读者端':'管理端') : '未登录' }}
+            </div>
+          </div>
+        </div>
+
+        <div class="flex-1"></div>
+
+        <SearchBar v-if="Auth.isAuthed()" />
+
+        <button class="ml-2 px-3 py-2 rounded-xl lift border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+          @click="toggleTheme">
+          <span class="text-sm">{{ Theme.dark ? '夜间' : '白天' }}</span>
+        </button>
+
+        <template v-if="Auth.isAuthed()">
+          <div class="ml-2 text-sm text-slate-600 dark:text-slate-300">
+            {{ Auth.username }}
+          </div>
+          <button class="px-3 py-2 rounded-xl lift bg-mint-400 text-white hover:bg-mint-500"
+            @click="doLogout">退出</button>
+        </template>
+        <template v-else>
+          <router-link class="px-3 py-2 rounded-xl lift bg-mint-400 text-white hover:bg-mint-500" to="/login">
+            登录
+          </router-link>
+        </template>
+      </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-6">
+      <router-view />
+    </main>
+
+    <Toast />
+  </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    return {
+      Auth, Theme,
+      toggleTheme() { Theme.dark = !Theme.dark; Theme.apply(); },
+      doLogout() { Auth.logout(); toast("已退出"); router.push("/login"); }
+    };
+  }
+};
+
+const Toast = {
+  template: `
+    <div class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 space-y-2">
+      <div v-for="t in ToastBus.list" :key="t.id"
+        class="px-4 py-3 rounded-2xl shadow-lg border text-sm glass border-mint-200 dark:border-slate-700">
+        <span v-if="t.type==='ok'">✅</span>
+        <span v-else-if="t.type==='err'">⚠️</span>
+        <span v-else>💬</span>
+        <span class="ml-2">{{ t.msg }}</span>
+      </div>
+    </div>
+  `,
+  setup(){ return { ToastBus }; }
+};
+
+const Card = {
+  props: ["title", "desc"],
+  template: `
+    <div class="rounded-2xl border border-mint-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm">
+      <div class="text-lg font-semibold">{{title}}</div>
+      <div v-if="desc" class="text-sm text-slate-500 dark:text-slate-400 mt-1">{{desc}}</div>
+      <div class="mt-4"><slot /></div>
+    </div>
+  `
+};
+
+const Btn = {
+  props: ["label", "variant", "type"],
+  template: `
+    <button :type="type||'button'"
+      class="lift px-4 py-2 rounded-xl text-sm font-medium"
+      :class="variantClass">
+      {{label}}<slot />
+    </button>
+  `,
+  computed: {
+    variantClass() {
+      const v = this.variant || "primary";
+      if (v === "primary") return "bg-mint-400 hover:bg-mint-500 text-white";
+      if (v === "soft") return "bg-mint-100 dark:bg-slate-800 hover:bg-mint-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 border border-mint-200 dark:border-slate-700";
+      if (v === "danger") return "bg-rose-500 hover:bg-rose-600 text-white";
+      return "bg-slate-200 hover:bg-slate-300 text-slate-800";
+    }
+  }
+};
+
+/** =========================
+ *  SearchBar: Algolia autocomplete
+ *  ========================= */
+const SearchBar = {
+  template: `
+  <div class="relative w-[360px] max-w-[46vw]">
+    <input v-model="q" @input="onInput" @focus="open=true" @blur="onBlur"
+      placeholder="搜索书名 / ISBN / 分类..."
+      class="w-full px-4 py-2 rounded-2xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-mint-300"/>
+    <div v-if="open && suggestions.length"
+      class="absolute mt-2 w-full rounded-2xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg overflow-hidden">
+      <div class="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-mint-100 dark:border-slate-800">
+        建议（点击快速选择）
+      </div>
+      <button v-for="s in suggestions" :key="s.objectID"
+        class="w-full text-left px-3 py-2 hover:bg-mint-100 dark:hover:bg-slate-800"
+        @mousedown.prevent="selectSuggestion(s)">
+        <div class="text-sm font-medium">{{ s.title }}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400">
+          {{ s.isbn || '无ISBN' }} · {{ s.publisher_name || '未知出版社' }} · 可借 {{ s.available_copies ?? '-' }}
+        </div>
+      </button>
+      <div class="px-3 py-2 text-xs text-slate-500 dark:text-slate-400 border-t border-mint-100 dark:border-slate-800">
+        回车：查看搜索结果
+      </div>
+    </div>
+  </div>
+  `,
+  setup() {
+    const router = VueRouter.useRouter();
+    const q = Vue.ref("");
+    const open = Vue.ref(false);
+    const suggestions = Vue.ref([]);
+
+    let index = null;
+    if (CONFIG.ALGOLIA.APP_ID && CONFIG.ALGOLIA.SEARCH_ONLY_KEY) {
+      const client = algoliasearch(CONFIG.ALGOLIA.APP_ID, CONFIG.ALGOLIA.SEARCH_ONLY_KEY);
+      index = client.initIndex(CONFIG.ALGOLIA.INDEX);
+    }
+
+    let tmr = null;
+    async function onInput() {
+      open.value = true;
+      clearTimeout(tmr);
+      tmr = setTimeout(async () => {
+        if (!q.value.trim()) { suggestions.value = []; return; }
+        if (!index) { suggestions.value = []; return; }
+        try {
+          const res = await index.search(q.value.trim(), { hitsPerPage: 6 });
+          suggestions.value = res.hits || [];
+        } catch (e) {
+          suggestions.value = [];
+        }
+      }, 220);
+    }
+
+    function selectSuggestion(s) {
+      open.value = false;
+      q.value = "";
+      router.push(`/books/${s.book_id || s.objectID}`);
+    }
+
+    function onBlur() {
+      setTimeout(()=> open.value = false, 120);
+    }
+
+    // 回车跳转搜索页
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && open.value && q.value.trim()) {
+        router.push({ path: "/search", query: { q: q.value.trim() } });
+        open.value = false;
+        q.value = "";
+      }
+    });
+
+    return { q, open, suggestions, onInput, onBlur, selectSuggestion };
+  }
+};
+
+/** =========================
+ *  Pages
+ *  ========================= */
+
+const LoginPage = {
+  template: `
+  <div class="grid md:grid-cols-2 gap-6">
+    <Card title="登录" desc="管理员/馆员/读者登录入口（选择身份）">
+      <form @submit.prevent="doLogin" class="space-y-3">
+        <div>
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">身份</div>
+          <select v-model="form.user_type"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <option value="reader">读者</option>
+            <option value="staff">管理员/馆员</option>
+          </select>
+        </div>
+        <div>
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">用户名</div>
+          <input v-model="form.username"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+        </div>
+        <div>
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">密码</div>
+          <input type="password" v-model="form.password"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+        </div>
+
+        <div class="flex items-center gap-2">
+          <Btn label="登录" variant="primary" type="submit" />
+          <router-link class="text-sm text-mint-700 dark:text-mint-300 hover:underline" to="/register">
+            注册读者账号
+          </router-link>
+        </div>
+      </form>
+    </Card>
+
+    <Card title="说明" desc="读者端：借/还/查借阅/查罚款/缴费；管理端：CRUD + 代办">
+      <div class="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+        登录时请注意角色的选择，否则将登录失败<br/>
+        如果用户忘记密码请联系管理员修改密码。
+      </div>
+    </Card>
+  </div>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const router = VueRouter.useRouter();
+    const form = Vue.reactive({ user_type: "reader", username: "", password: "" });
+
+    async function doLogin() {
+      try {
+        const res = await api.post("/api/auth/login", form);
+        Auth.setAuth(res.data);
+        toast("登录成功", "ok");
+        router.push("/");
+      } catch (e) {
+        toast(e?.response?.data?.detail || "登录失败", "err");
+      }
+    }
+    return { form, doLogin };
+  }
+};
+
+const RegisterPage = {
+  template: `
+  <div class="max-w-2xl mx-auto">
+    <Card title="注册读者账号" desc="注册后可登录读者端：借阅/归还/罚款查询">
+      <form @submit.prevent="doRegister" class="grid md:grid-cols-2 gap-3">
+        <div class="md:col-span-2">
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">用户名</div>
+          <input v-model="form.username" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+        </div>
+        <div class="md:col-span-2">
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">密码</div>
+          <input type="password" v-model="form.password" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+        </div>
+        <div>
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">读者证号/学号</div>
+          <input v-model="form.reader_no" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+        </div>
+        <div>
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">姓名</div>
+          <input v-model="form.name" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+        </div>
+        <div class="md:col-span-2">
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">读者类别</div>
+          <select v-model="form.category_id" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <option disabled value="">请选择</option>
+            <option v-for="c in cats" :key="c.category_id" :value="c.category_id">
+              {{c.category_name}}（最多借{{c.max_borrow_count}}本 / {{c.max_borrow_days}}天 / 超期{{c.fine_per_day}}元/天）
+            </option>
+          </select>
+        </div>
+
+        <div class="md:col-span-2 flex items-center gap-2 mt-2">
+          <Btn label="注册并登录" variant="primary" type="submit" />
+          <router-link class="text-sm text-mint-700 dark:text-mint-300 hover:underline" to="/login">返回登录</router-link>
+        </div>
+      </form>
+    </Card>
+  </div>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const router = VueRouter.useRouter();
+    const form = Vue.reactive({ username:"", password:"", reader_no:"", name:"", category_id:"" });
+    const cats = Vue.ref([]);
+
+    Vue.onMounted(async () => {
+      const res = await api.get("/api/reader-categories");
+      cats.value = res.data;
+    });
+
+    async function doRegister() {
+      try {
+        const res = await api.post("/api/auth/register-reader", {
+          ...form,
+          category_id: Number(form.category_id)
+        });
+        Auth.setAuth(res.data);
+        toast("注册成功", "ok");
+        router.push("/");
+      } catch (e) {
+        toast(e?.response?.data?.detail || "注册失败", "err");
+      }
+    }
+
+    return { form, cats, doRegister };
+  }
+};
+
+const HomePage = {
+  template: `
+  <div class="grid lg:grid-cols-3 gap-6">
+    <Card title="欢迎" desc="图书馆管理系统欢迎您">
+      <div class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+        你当前身份：<b>{{ Auth.role || '未登录' }}</b><br/>
+        读者端：借/还/查借阅/查罚款/缴费<br/>
+        管理端：管理读者/出版社/图书/馆藏 + 代办借还
+      </div>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <router-link class="lift px-4 py-2 rounded-xl bg-mint-400 text-white hover:bg-mint-500" to="/books">查书</router-link>
+        <router-link class="lift px-4 py-2 rounded-xl bg-mint-100 dark:bg-slate-800 border border-mint-200 dark:border-slate-700" to="/borrows">借阅记录</router-link>
+        <router-link class="lift px-4 py-2 rounded-xl bg-mint-100 dark:bg-slate-800 border border-mint-200 dark:border-slate-700" to="/fines">罚款</router-link>
+      </div>
+    </Card>
+
+    <Card v-if="Auth.role==='admin' || Auth.role==='librarian'" title="管理端入口" desc="在这里进行各项管理">
+      <div class="grid grid-cols-2 gap-2">
+        <router-link class="lift px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-mint-200 dark:border-slate-700" to="/admin/readers">读者管理</router-link>
+        <router-link class="lift px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-mint-200 dark:border-slate-700" to="/admin/publishers">出版社</router-link>
+        <router-link class="lift px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-mint-200 dark:border-slate-700" to="/admin/books">图书</router-link>
+        <router-link class="lift px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-mint-200 dark:border-slate-700" to="/admin/copies">馆藏</router-link>
+      </div>
+    </Card>
+
+    <Card title="借/还快捷操作" desc="读者可自己借还；管理员也可代办">
+      <div class="space-y-3">
+        <div>
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">借书：输入馆藏 copy_id</div>
+          <div class="flex gap-2">
+            <input v-model="borrowCopyId" class="flex-1 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+            <Btn label="借" variant="primary" @click="doBorrow"/>
+          </div>
+        </div>
+        <div>
+          <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">还书：输入 borrow_id</div>
+          <div class="flex gap-2">
+            <input v-model="returnBorrowId" class="flex-1 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+            <Btn label="还" variant="soft" @click="doReturn"/>
+          </div>
+          <div class="mt-2 flex items-center gap-2 text-sm">
+            <input id="dam" type="checkbox" v-model="isDamaged" class="accent-mint-500"/>
+            <label for="dam" class="text-slate-600 dark:text-slate-300">损坏</label>
+            <input v-if="isDamaged" v-model="damageDesc" placeholder="损坏描述"
+              class="flex-1 px-3 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          </div>
+        </div>
+      </div>
+    </Card>
+  </div>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const borrowCopyId = Vue.ref("");
+    const returnBorrowId = Vue.ref("");
+    const isDamaged = Vue.ref(false);
+    const damageDesc = Vue.ref("");
+
+    async function doBorrow() {
+      if (!borrowCopyId.value) return toast("请输入 copy_id", "err");
+      try {
+        await api.post("/api/borrow", { copy_id: Number(borrowCopyId.value) });
+        toast("借阅成功", "ok");
+        borrowCopyId.value = "";
+      } catch (e) {
+        toast(e?.response?.data?.detail || "借阅失败", "err");
+      }
+    }
+    async function doReturn() {
+      if (!returnBorrowId.value) return toast("请输入 borrow_id", "err");
+      try {
+        await api.post("/api/return", {
+          borrow_id: Number(returnBorrowId.value),
+          is_damaged: isDamaged.value,
+          damage_desc: damageDesc.value || null
+        });
+        toast("归还成功（如有超期/损坏会自动生成罚款）", "ok");
+        returnBorrowId.value = "";
+        isDamaged.value = false;
+        damageDesc.value = "";
+      } catch (e) {
+        toast(e?.response?.data?.detail || "归还失败", "err");
+      }
+    }
+
+    return { Auth, borrowCopyId, returnBorrowId, isDamaged, damageDesc, doBorrow, doReturn };
+  }
+};
+
+const BooksPage = {
+  template: `
+  <Card title="图书目录" desc="读者也可访问；管理端可新增/修改/删除（在管理页）">
+    <div class="flex gap-2 mb-4">
+      <input v-model="kw" placeholder="本地过滤：书名/ISBN"
+        class="flex-1 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <Btn label="刷新" variant="soft" @click="load"/>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-3">
+      <div v-for="b in filtered" :key="b.book_id"
+        class="rounded-2xl border border-mint-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lift">
+        <div class="font-semibold">{{ b.title }}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          ISBN：{{ b.isbn || '无' }} · {{ b.publisher_name || '未知出版社' }} · 可借 {{ b.available_copies }} / 总数 {{ b.total_copies }}
+        </div>
+        <div class="mt-3 flex gap-2">
+          <router-link class="px-3 py-2 rounded-xl bg-mint-100 dark:bg-slate-800 border border-mint-200 dark:border-slate-700 lift text-sm"
+            :to="'/books/'+b.book_id">详情</router-link>
+          <router-link class="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-mint-200 dark:border-slate-700 lift text-sm"
+            :to="{ path:'/copies', query:{ book_id: b.book_id } }">看馆藏</router-link>
+        </div>
+      </div>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const kw = Vue.ref("");
+    const list = Vue.ref([]);
+    async function load() {
+      const res = await api.get("/api/books");
+      list.value = res.data;
+    }
+    Vue.onMounted(load);
+
+    const filtered = Vue.computed(() => {
+      const s = kw.value.trim().toLowerCase();
+      if (!s) return list.value;
+      return list.value.filter(x =>
+        (x.title||"").toLowerCase().includes(s) ||
+        (x.isbn||"").toLowerCase().includes(s)
+      );
+    });
+
+    return { kw, list, filtered, load };
+  }
+};
+
+const BookDetailPage = {
+  template: `
+  <div v-if="book">
+    <Card :title="book.title" :desc="'可借 ' + book.available_copies + ' / 总数 ' + book.total_copies">
+      <div class="grid md:grid-cols-2 gap-3 text-sm text-slate-600 dark:text-slate-300">
+        <div>ISBN：{{ book.isbn || '无' }}</div>
+        <div>分类：{{ book.category || '未分类' }}</div>
+        <div>语言：{{ book.language || '-' }}</div>
+        <div>价格：{{ book.price ?? '-' }}</div>
+        <div>出版社：{{ book.publisher_name || '未知出版社' }}</div>
+      </div>
+      <div class="mt-4 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+        简介：{{ book.summary || '暂无简介' }}
+      </div>
+      <div class="mt-4">
+        <router-link class="lift px-4 py-2 rounded-xl bg-mint-100 dark:bg-slate-800 border border-mint-200 dark:border-slate-700"
+          :to="{ path:'/copies', query:{ book_id: book.book_id } }">查看馆藏</router-link>
+      </div>
+    </Card>
+  </div>
+  `,
+  components: { Card },
+  setup() {
+    const route = VueRouter.useRoute();
+    const book = Vue.ref(null);
+    Vue.onMounted(async () => {
+      const res = await api.get("/api/books");
+      const id = Number(route.params.id);
+      book.value = res.data.find(x => x.book_id === id) || null;
+      if (!book.value) toast("找不到该书", "err");
+    });
+    return { book };
+  }
+};
+
+const CopiesPage = {
+  template: `
+  <Card title="馆藏列表" desc="显示每一册（copy_id / barcode / 状态）。读者借书要用 copy_id">
+    <div class="flex gap-2 mb-4">
+      <input v-model="bookId" placeholder="book_id（可选）"
+        class="w-44 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <Btn label="查询" variant="soft" @click="load"/>
+      <div class="flex-1"></div>
+      <div class="text-sm text-slate-500 dark:text-slate-400">借书快捷：回到首页输入 copy_id</div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-slate-500 dark:text-slate-400 border-b border-mint-200 dark:border-slate-800">
+            <th class="py-2">copy_id</th>
+            <th>book_id</th>
+            <th>barcode</th>
+            <th>location</th>
+            <th>status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="c in list" :key="c.copy_id" class="border-b border-mint-100 dark:border-slate-900">
+            <td class="py-2 font-medium">{{c.copy_id}}</td>
+            <td>{{c.book_id}}</td>
+            <td>{{c.barcode}}</td>
+            <td>{{c.location || '-'}}</td>
+            <td>
+              <span class="px-2 py-1 rounded-lg text-xs"
+                :class="c.status==='available' ? 'bg-mint-100 text-mint-800 dark:bg-slate-800 dark:text-mint-200' :
+                        c.status==='borrowed' ? 'bg-amber-100 text-amber-800 dark:bg-slate-800 dark:text-amber-200' :
+                        'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'">
+                {{c.status}}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const route = VueRouter.useRoute();
+    const bookId = Vue.ref(route.query.book_id || "");
+    const list = Vue.ref([]);
+
+    async function load() {
+      const params = {};
+      if (bookId.value) params.book_id = Number(bookId.value);
+      const res = await api.get("/api/copies", { params });
+      list.value = res.data;
+    }
+    Vue.onMounted(load);
+    return { bookId, list, load };
+  }
+};
+
+const BorrowsPage = {
+  template: `
+  <Card title="借阅记录" desc="读者只看自己的；管理员可看全部（这里给了全量展示，你也可加筛选）">
+    <div class="flex gap-2 mb-4">
+      <select v-model="status" class="px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <option value="">全部</option>
+        <option value="borrowed">借出中</option>
+        <option value="returned">已归还</option>
+        <option value="overdue_returned">超期归还</option>
+        <option value="damaged_returned">损坏归还</option>
+      </select>
+      <Btn label="刷新" variant="soft" @click="load"/>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-slate-500 dark:text-slate-400 border-b border-mint-200 dark:border-slate-800">
+            <th class="py-2">borrow_id</th>
+            <th>reader_id</th>
+            <th>copy_id</th>
+            <th>due</th>
+            <th>return</th>
+            <th>status</th>
+            <th>fine</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="b in list" :key="b.borrow_id" class="border-b border-mint-100 dark:border-slate-900">
+            <td class="py-2 font-medium">{{b.borrow_id}}</td>
+            <td>{{b.reader_id}}</td>
+            <td>{{b.copy_id}}</td>
+            <td>{{fmt(b.due_time)}}</td>
+            <td>{{b.return_time ? fmt(b.return_time) : '-'}}</td>
+            <td>{{b.status}}</td>
+            <td>
+              <span v-if="b.fine_amount>0" class="text-rose-600 dark:text-rose-300">
+                {{b.fine_amount}} ({{b.fine_status}})
+              </span>
+              <span v-else>-</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const list = Vue.ref([]);
+    const status = Vue.ref("");
+
+    function fmt(s) {
+      const d = new Date(s);
+      return d.toLocaleString();
+    }
+
+    async function load() {
+      const res = await api.get("/api/borrows", { params: status.value ? { status: status.value } : {} });
+      list.value = res.data;
+    }
+    Vue.onMounted(load);
+    return { list, status, load, fmt };
+  }
+};
+
+const FinesPage = {
+  template: `
+  <Card title="罚款与缴费" desc="读者只看自己的罚款；可直接缴费（写入缴费记录并更新余额）">
+    <div class="flex gap-2 mb-4">
+      <select v-model="status" class="px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <option value="">全部</option>
+        <option value="unpaid">未缴</option>
+        <option value="paid">已缴</option>
+      </select>
+      <Btn label="刷新" variant="soft" @click="load"/>
+      <div class="flex-1"></div>
+      <div class="text-sm text-slate-500 dark:text-slate-400">
+        说明：归还时若超期/损坏会自动生成罚款
+      </div>
+    </div>
+
+    <div class="space-y-3">
+      <div v-for="f in list" :key="f.fine_id"
+        class="rounded-2xl border border-mint-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-xl bg-mint-100 dark:bg-slate-800 flex items-center justify-center">💸</div>
+          <div class="flex-1">
+            <div class="font-semibold">
+              fine_id={{f.fine_id}} · {{f.reason}} · ￥{{f.amount}}
+              <span class="ml-2 text-xs px-2 py-1 rounded-lg"
+                :class="f.status==='unpaid' ? 'bg-rose-100 text-rose-700 dark:bg-slate-800 dark:text-rose-200' :
+                        'bg-mint-100 text-mint-800 dark:bg-slate-800 dark:text-mint-200'">
+                {{f.status}}
+              </span>
+            </div>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              created: {{fmt(f.created_at)}} · paid: {{f.paid_at ? fmt(f.paid_at) : '-'}} · borrow_id: {{f.borrow_id || '-'}}
+            </div>
+          </div>
+
+          <div v-if="f.status==='unpaid'" class="flex items-center gap-2">
+            <select v-model="payMethod[f.fine_id]"
+              class="px-3 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm">
+              <option value="cash">现金</option>
+              <option value="wechat">微信</option>
+              <option value="alipay">支付宝</option>
+              <option value="card">刷卡</option>
+              <option value="other">其他</option>
+            </select>
+            <Btn label="缴费" variant="primary" @click="pay(f.fine_id)"/>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const list = Vue.ref([]);
+    const status = Vue.ref("");
+    const payMethod = Vue.reactive({});
+
+    function fmt(s) { return new Date(s).toLocaleString(); }
+
+    async function load() {
+      const res = await api.get("/api/fines", { params: status.value ? { status: status.value } : {} });
+      list.value = res.data;
+      for (const f of list.value) payMethod[f.fine_id] ||= "cash";
+    }
+
+    async function pay(fine_id) {
+      try {
+        await api.post(`/api/fines/${fine_id}/pay`, { method: payMethod[fine_id] });
+        toast("缴费成功", "ok");
+        await load();
+      } catch (e) {
+        toast(e?.response?.data?.detail || "缴费失败", "err");
+      }
+    }
+
+    Vue.onMounted(load);
+    return { list, status, load, fmt, payMethod, pay };
+  }
+};
+
+/** ======= Admin CRUD Pages（简化版） ======= */
+
+function guardAdmin() {
+  if (!(Auth.role === "admin" || Auth.role === "librarian")) {
+    toast("无权限访问管理端", "err");
+    return false;
+  }
+  return true;
+}
+
+const AdminReaders = {
+  template: `
+  <Card title="读者管理" desc="管理员/馆员：修改读者信息（删除仅admin）">
+    <div class="flex gap-2 mb-4">
+      <Btn label="刷新" variant="soft" @click="load"/>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-slate-500 dark:text-slate-400 border-b border-mint-200 dark:border-slate-800">
+            <th class="py-2">reader_id</th><th>reader_no</th><th>name</th><th>status</th><th>borrowed</th><th>fine</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in list" :key="r.reader_id" class="border-b border-mint-100 dark:border-slate-900">
+            <td class="py-2 font-medium">{{r.reader_id}}</td>
+            <td>{{r.reader_no}}</td>
+            <td><input v-model="r.name" class="px-2 py-1 rounded-lg border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/></td>
+            <td>
+              <select v-model="r.status" class="px-2 py-1 rounded-lg border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                <option value="active">active</option>
+                <option value="blocked">blocked</option>
+              </select>
+            </td>
+            <td>{{r.borrowed_count}}</td>
+            <td>{{r.fine_balance}}</td>
+            <td class="space-x-2">
+              <button class="lift px-3 py-1 rounded-lg bg-mint-400 hover:bg-mint-500 text-white" @click="save(r)">保存</button>
+              <button v-if="Auth.role==='admin'" class="lift px-3 py-1 rounded-lg bg-rose-500 hover:bg-rose-600 text-white" @click="del(r.reader_id)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </Card>
+  `,
+  components: { Card },
+  setup() {
+    const router = VueRouter.useRouter();
+    const list = Vue.ref([]);
+    Vue.onMounted(async ()=>{
+      if (!guardAdmin()) return router.push("/");
+      await load();
+    });
+
+    async function load() {
+      const res = await api.get("/api/readers");
+      list.value = res.data;
+    }
+    async function save(r) {
+      try {
+        await api.put(`/api/readers/${r.reader_id}`, { name: r.name, status: r.status });
+        toast("保存成功", "ok");
+      } catch (e) {
+        toast(e?.response?.data?.detail || "保存失败", "err");
+      }
+    }
+    async function del(id) {
+      if (!confirm("确定删除该读者吗？")) return;
+      try {
+        await api.delete(`/api/readers/${id}`);
+        toast("删除成功", "ok");
+        await load();
+      } catch (e) {
+        toast(e?.response?.data?.detail || "删除失败", "err");
+      }
+    }
+
+    return { list, load, save, del, Auth };
+  }
+};
+
+const AdminPublishers = {
+  template: `
+  <Card title="出版社管理" desc="新增/修改/删除">
+    <div class="flex gap-2 mb-4">
+      <input v-model="newName" placeholder="新增出版社名称"
+        class="flex-1 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <Btn label="新增" variant="primary" @click="add"/>
+      <Btn label="刷新" variant="soft" @click="load"/>
+    </div>
+    <div class="space-y-2">
+      <div v-for="p in list" :key="p.publisher_id"
+        class="flex items-center gap-2 rounded-2xl border border-mint-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
+        <div class="w-16 text-xs text-slate-500">#{{p.publisher_id}}</div>
+        <input v-model="p.name" class="flex-1 px-3 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+        <button class="lift px-3 py-2 rounded-xl bg-mint-400 hover:bg-mint-500 text-white text-sm" @click="save(p)">保存</button>
+        <button class="lift px-3 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-sm" @click="del(p.publisher_id)">删除</button>
+      </div>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const router = VueRouter.useRouter();
+    const list = Vue.ref([]);
+    const newName = Vue.ref("");
+
+    Vue.onMounted(async ()=>{
+      if (!guardAdmin()) return router.push("/");
+      await load();
+    });
+
+    async function load() {
+      const res = await api.get("/api/publishers");
+      list.value = res.data;
+    }
+    async function add() {
+      if (!newName.value.trim()) return toast("请输入出版社名称", "err");
+      try {
+        await api.post("/api/publishers", { name: newName.value.trim() });
+        toast("新增成功", "ok");
+        newName.value = "";
+        await load();
+      } catch(e) {
+        toast(e?.response?.data?.detail || "新增失败", "err");
+      }
+    }
+    async function save(p) {
+      try {
+        await api.put(`/api/publishers/${p.publisher_id}`, { name: p.name, contact: p.contact||null, phone: p.phone||null, address: p.address||null });
+        toast("保存成功", "ok");
+      } catch(e) {
+        toast(e?.response?.data?.detail || "保存失败", "err");
+      }
+    }
+    async function del(id) {
+      if (!confirm("确定删除吗？")) return;
+      try {
+        await api.delete(`/api/publishers/${id}`);
+        toast("删除成功", "ok");
+        await load();
+      } catch(e) {
+        toast(e?.response?.data?.detail || "删除失败", "err");
+      }
+    }
+
+    return { list, newName, load, add, save, del };
+  }
+};
+
+const AdminBooks = {
+  template: `
+  <Card title="图书管理" desc="新增/修改/删除（会尝试同步 Algolia）">
+    <div class="grid md:grid-cols-4 gap-2 mb-4">
+      <input v-model="form.title" placeholder="书名*"
+        class="md:col-span-2 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <input v-model="form.isbn" placeholder="ISBN"
+        class="px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <input v-model="form.category" placeholder="分类"
+        class="px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <div class="md:col-span-4 flex gap-2">
+        <Btn label="新增图书" variant="primary" @click="add"/>
+        <Btn label="刷新" variant="soft" @click="load"/>
+      </div>
+    </div>
+
+    <div class="space-y-2">
+      <div v-for="b in list" :key="b.book_id"
+        class="rounded-2xl border border-mint-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+        <div class="flex gap-2 items-center">
+          <div class="text-xs text-slate-500 w-20">#{{b.book_id}}</div>
+          <input v-model="b.title" class="flex-1 px-3 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          <input v-model="b.isbn" class="w-48 px-3 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+        </div>
+        <div class="mt-2 flex gap-2 items-center">
+          <input v-model="b.category" placeholder="分类" class="flex-1 px-3 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          <div class="text-xs text-slate-500">可借 {{b.available_copies}} / 总 {{b.total_copies}}</div>
+          <button class="lift px-3 py-2 rounded-xl bg-mint-400 hover:bg-mint-500 text-white text-sm" @click="save(b)">保存</button>
+          <button class="lift px-3 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-sm" @click="del(b.book_id)">删除</button>
+        </div>
+      </div>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const router = VueRouter.useRouter();
+    const list = Vue.ref([]);
+    const form = Vue.reactive({ title:"", isbn:"", category:"" });
+
+    Vue.onMounted(async ()=>{
+      if (!guardAdmin()) return router.push("/");
+      await load();
+    });
+
+    async function load() {
+      const res = await api.get("/api/books");
+      list.value = res.data;
+    }
+    async function add() {
+      if (!form.title.trim()) return toast("书名必填", "err");
+      try {
+        await api.post("/api/books", { title: form.title.trim(), isbn: form.isbn.trim()||null, category: form.category.trim()||null });
+        toast("新增成功", "ok");
+        form.title=""; form.isbn=""; form.category="";
+        await load();
+      } catch(e) {
+        toast(e?.response?.data?.detail || "新增失败", "err");
+      }
+    }
+    async function save(b) {
+      try {
+        await api.put(`/api/books/${b.book_id}`, { title: b.title, isbn: b.isbn||null, category: b.category||null });
+        toast("保存成功", "ok");
+      } catch(e) {
+        toast(e?.response?.data?.detail || "保存失败", "err");
+      }
+    }
+    async function del(id) {
+      if (!confirm("确定删除该图书吗？（需先删馆藏）")) return;
+      try {
+        await api.delete(`/api/books/${id}`);
+        toast("删除成功", "ok");
+        await load();
+      } catch(e) {
+        toast(e?.response?.data?.detail || "删除失败", "err");
+      }
+    }
+
+    return { list, form, load, add, save, del };
+  }
+};
+
+const AdminCopies = {
+  template: `
+  <Card title="馆藏管理" desc="新增馆藏会自动更新图书库存；删除仅admin">
+    <div class="grid md:grid-cols-4 gap-2 mb-4">
+      <input v-model="form.book_id" placeholder="book_id*"
+        class="px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <input v-model="form.barcode" placeholder="barcode*（唯一）"
+        class="md:col-span-2 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <input v-model="form.location" placeholder="location"
+        class="px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <div class="md:col-span-4 flex gap-2">
+        <Btn label="新增馆藏" variant="primary" @click="add"/>
+        <Btn label="刷新" variant="soft" @click="load"/>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-slate-500 dark:text-slate-400 border-b border-mint-200 dark:border-slate-800">
+            <th class="py-2">copy_id</th><th>book_id</th><th>barcode</th><th>location</th><th>status</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="c in list" :key="c.copy_id" class="border-b border-mint-100 dark:border-slate-900">
+            <td class="py-2 font-medium">{{c.copy_id}}</td>
+            <td>{{c.book_id}}</td>
+            <td>{{c.barcode}}</td>
+            <td><input v-model="c.location" class="px-2 py-1 rounded-lg border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/></td>
+            <td>
+              <select v-model="c.status" class="px-2 py-1 rounded-lg border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                <option value="available">available</option>
+                <option value="borrowed">borrowed</option>
+                <option value="lost">lost</option>
+                <option value="repair">repair</option>
+              </select>
+            </td>
+            <td class="space-x-2">
+              <button class="lift px-3 py-1 rounded-lg bg-mint-400 hover:bg-mint-500 text-white" @click="save(c)">保存</button>
+              <button v-if="Auth.role==='admin'" class="lift px-3 py-1 rounded-lg bg-rose-500 hover:bg-rose-600 text-white" @click="del(c.copy_id)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const router = VueRouter.useRouter();
+    const list = Vue.ref([]);
+    const form = Vue.reactive({ book_id:"", barcode:"", location:"" });
+
+    Vue.onMounted(async ()=>{
+      if (!guardAdmin()) return router.push("/");
+      await load();
+    });
+
+    async function load() {
+      const res = await api.get("/api/copies");
+      list.value = res.data;
+    }
+    async function add() {
+      if (!form.book_id || !form.barcode.trim()) return toast("book_id 和 barcode 必填", "err");
+      try {
+        await api.post("/api/copies", {
+          book_id: Number(form.book_id),
+          barcode: form.barcode.trim(),
+          location: form.location.trim() || null,
+          status: "available"
+        });
+        toast("新增成功", "ok");
+        form.book_id=""; form.barcode=""; form.location="";
+        await load();
+      } catch(e) {
+        toast(e?.response?.data?.detail || "新增失败", "err");
+      }
+    }
+    async function save(c) {
+      try {
+        await api.put(`/api/copies/${c.copy_id}`, {
+          book_id: c.book_id,
+          barcode: c.barcode,
+          location: c.location || null,
+          status: c.status
+        });
+        toast("保存成功", "ok");
+      } catch(e) {
+        toast(e?.response?.data?.detail || "保存失败", "err");
+      }
+    }
+    async function del(id) {
+      if (!confirm("确定删除该馆藏吗？")) return;
+      try {
+        await api.delete(`/api/copies/${id}`);
+        toast("删除成功", "ok");
+        await load();
+      } catch(e) {
+        toast(e?.response?.data?.detail || "删除失败", "err");
+      }
+    }
+
+    return { list, form, load, add, save, del, Auth };
+  }
+};
+
+const SearchPage = {
+  template: `
+  <Card title="搜索结果" desc="使用 Algolia 搜索（若没配置 Algolia，会提示）">
+    <div class="flex gap-2 mb-4">
+      <input v-model="q" placeholder="输入关键词..."
+        class="flex-1 px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+      <Btn label="搜索" variant="primary" @click="searchNow"/>
+    </div>
+
+    <div v-if="!algoliaOk" class="text-sm text-amber-700 dark:text-amber-200 bg-amber-100 dark:bg-slate-800 border border-amber-200 dark:border-slate-700 rounded-2xl p-4">
+      你还没配置 Algolia（CONFIG.ALGOLIA），所以这里只能用本地 /books 页面查看。
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-3 mt-4">
+      <div v-for="h in hits" :key="h.objectID"
+        class="rounded-2xl border border-mint-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 lift">
+        <div class="font-semibold">{{h.title}}</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          {{h.isbn || '无ISBN'}} · {{h.publisher_name || '未知出版社'}} · 可借 {{h.available_copies ?? '-'}}
+        </div>
+        <div class="mt-3">
+          <router-link class="lift px-4 py-2 rounded-xl bg-mint-100 dark:bg-slate-800 border border-mint-200 dark:border-slate-700"
+            :to="'/books/'+(h.book_id||h.objectID)">查看详情</router-link>
+        </div>
+      </div>
+    </div>
+  </Card>
+  `,
+  components: { Card, Btn },
+  setup() {
+    const route = VueRouter.useRoute();
+    const router = VueRouter.useRouter();
+
+    const q = Vue.ref((route.query.q || "").toString());
+    const hits = Vue.ref([]);
+
+    const algoliaOk = !!(CONFIG.ALGOLIA.APP_ID && CONFIG.ALGOLIA.SEARCH_ONLY_KEY && CONFIG.ALGOLIA.INDEX);
+    let index = null;
+    if (algoliaOk) {
+      const client = algoliasearch(CONFIG.ALGOLIA.APP_ID, CONFIG.ALGOLIA.SEARCH_ONLY_KEY);
+      index = client.initIndex(CONFIG.ALGOLIA.INDEX);
+    }
+
+    // 简易 debounce
+    function debounce(fn, ms = 250) {
+      let t = null;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), ms);
+      };
+    }
+
+    async function doSearch(keyword) {
+      const s = (keyword || "").trim();
+      if (!index) return;
+      if (!s) {
+        hits.value = [];
+        return;
+      }
+      // 你可以改成 >=2 才触发，减少请求
+      // if (s.length < 2) { hits.value = []; return; }
+
+      const res = await index.search(s, { hitsPerPage: 12 });
+      hits.value = res.hits || [];
+    }
+
+    const debouncedSearch = debounce(doSearch, 250);
+
+    // 输入即搜：q变化 -> 更新URL -> debouncedSearch
+    Vue.watch(q, (val) => {
+      router.replace({ query: { ...route.query, q: val || "" } });
+      debouncedSearch(val);
+    });
+
+    // 点击按钮：立刻搜（不等 debounce）
+    async function searchNow() {
+      await doSearch(q.value);
+    }
+
+    Vue.onMounted(() => {
+      if (q.value && index) doSearch(q.value);
+    });
+
+    return { q, hits, algoliaOk, searchNow };
+  }
+};
+
+/** =========================
+ *  Router
+ *  ========================= */
+const routes = [
+  { path: "/", component: HomePage },
+  { path: "/login", component: LoginPage },
+  { path: "/register", component: RegisterPage },
+
+  { path: "/books", component: BooksPage },
+  { path: "/books/:id", component: BookDetailPage },
+  { path: "/copies", component: CopiesPage },
+  { path: "/borrows", component: BorrowsPage },
+  { path: "/fines", component: FinesPage },
+  { path: "/search", component: SearchPage },
+
+  { path: "/admin/readers", component: AdminReaders },
+  { path: "/admin/publishers", component: AdminPublishers },
+  { path: "/admin/books", component: AdminBooks },
+  { path: "/admin/copies", component: AdminCopies },
+];
+
+const router = VueRouter.createRouter({
+  history: VueRouter.createWebHashHistory(),
+  routes
+});
+
+router.beforeEach((to) => {
+  const publicPages = ["/login", "/register"];
+  if (!Auth.isAuthed() && !publicPages.includes(to.path)) {
+    toast("请先登录", "err");
+    return "/login";
+  }
+});
+
+/** =========================
+ *  App Mount
+ *  ========================= */
+const app = Vue.createApp(AppShell);
+app.component("Toast", Toast);
+app.component("SearchBar", SearchBar);
+app.use(router);
+app.mount("#app");
+</script>
+</body>
+</html>

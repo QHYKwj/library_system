@@ -1,0 +1,11 @@
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (1, '人民邮电出版社', '编辑部', '010-12345678', '北京市', '2026-01-15 18:22:12');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (2, '机械工业出版社', '图书事业部', '010-87654321', '北京市', '2026-01-15 18:22:12');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (3, '清华大学出版社', '发行部', '010-11223344', '北京市', '2026-01-15 18:22:12');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (4, 'O\'Reilly Media', 'Support', '+1-800-998-9938', 'CA, USA', '2026-01-15 18:22:12');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (5, '电子工业出版社', '编辑部', '010-58888888', '北京市', '2026-01-16 19:00:27');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (6, '高等教育出版社', '教材中心', '010-58581118', '北京市', '2026-01-16 19:00:27');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (7, '人民文学出版社', '文学编辑部', '010-65251111', '北京市', '2026-01-16 19:00:27');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (8, '上海译文出版社', '外文编辑部', '021-62472222', '上海市', '2026-01-16 19:00:27');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (9, 'Springer', 'Editorial Office', '+49-6221-3450', 'Heidelberg, Germany', '2026-01-16 19:00:27');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (10, 'MIT Press', 'Books Dept', '+1-617-253-2884', 'Cambridge, MA, USA', '2026-01-16 19:00:27');
+INSERT INTO `publisher` (`publisher_id`, `name`, `contact`, `phone`, `address`, `created_at`) VALUES (11, 'Pearson Education', 'Higher Education', '+1-800-677-6337', 'London, UK', '2026-01-16 19:00:27');

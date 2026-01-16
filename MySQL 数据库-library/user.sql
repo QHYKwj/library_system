@@ -1,0 +1,4 @@
+INSERT INTO `user` (`user_id`, `username`, `password_hash`, `role`, `reader_id`, `status`, `created_at`, `updated_at`) VALUES (1, 'admin', 'admin123', 'admin', NULL, 1, '2026-01-15 18:40:20', '2026-01-15 18:40:20');
+INSERT INTO `user` (`user_id`, `username`, `password_hash`, `role`, `reader_id`, `status`, `created_at`, `updated_at`) VALUES (2, 'librarian1', 'lib123', 'librarian', NULL, 1, '2026-01-15 18:40:20', '2026-01-15 18:40:20');
+INSERT INTO `user` (`user_id`, `username`, `password_hash`, `role`, `reader_id`, `status`, `created_at`, `updated_at`) VALUES (3, 'r001', '123456', 'reader', 1, 1, '2026-01-15 18:40:20', '2026-01-15 18:40:20');
+INSERT INTO `user` (`user_id`, `username`, `password_hash`, `role`, `reader_id`, `status`, `created_at`, `updated_at`) VALUES (4, 'r002', '123456', 'reader', 2, 1, '2026-01-15 18:40:20', '2026-01-15 18:40:20');

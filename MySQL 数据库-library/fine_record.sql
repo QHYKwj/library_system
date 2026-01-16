@@ -1,0 +1,2 @@
+INSERT INTO `fine_record` (`fine_id`, `reader_id`, `borrow_id`, `reason`, `amount`, `status`, `created_at`, `paid_at`) VALUES (1, 3, 3, 'overdue', 1.00, 'paid', '2026-01-14 18:22:12', '2026-01-15 18:22:12');
+INSERT INTO `fine_record` (`fine_id`, `reader_id`, `borrow_id`, `reason`, `amount`, `status`, `created_at`, `paid_at`) VALUES (2, 1, 4, 'damage', 10.00, 'unpaid', '2026-01-16 20:50:18', NULL);
