@@ -389,26 +389,47 @@ const RegisterPage = {
   template: `
   <div class="max-w-2xl mx-auto">
     <Card title="注册读者账号" desc="注册后可登录读者端：借阅/归还/罚款查询">
+      
+      <div v-if="errMsg" class="mb-4 text-sm rounded-2xl p-3 border border-rose-200 bg-rose-50 text-rose-700
+        dark:border-slate-700 dark:bg-slate-900 dark:text-rose-200">
+        {{ errMsg }}
+      </div>
+
       <form @submit.prevent="doRegister" class="grid md:grid-cols-2 gap-3">
         <div class="md:col-span-2">
           <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">用户名</div>
-          <input v-model="form.username" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          <input v-model="form.username"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
         </div>
+
         <div class="md:col-span-2">
           <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">密码</div>
-          <input type="password" v-model="form.password" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          <input type="password" v-model="form.password"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            建议 8-32 位；避免过长中文/emoji（bcrypt 限制 72 字节）
+            <span class="ml-2" :class="pwdBytes>72 ? 'text-rose-600 dark:text-rose-300 font-semibold' : ''">
+              当前：{{ pwdBytes }} bytes
+            </span>
+          </div>
         </div>
+
         <div>
           <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">读者证号/学号</div>
-          <input v-model="form.reader_no" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          <input v-model="form.reader_no"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
         </div>
+
         <div>
           <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">姓名</div>
-          <input v-model="form.name" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
+          <input v-model="form.name"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900"/>
         </div>
+
         <div class="md:col-span-2">
           <div class="text-sm mb-1 text-slate-600 dark:text-slate-300">读者类别</div>
-          <select v-model="form.category_id" class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+          <select v-model="form.category_id"
+            class="w-full px-4 py-2 rounded-xl border border-mint-200 dark:border-slate-700 bg-white dark:bg-slate-900">
             <option disabled value="">请选择</option>
             <option v-for="c in cats" :key="c.category_id" :value="c.category_id">
               {{c.category_name}}（最多借{{c.max_borrow_count}}本 / {{c.max_borrow_days}}天 / 超期{{c.fine_per_day}}元/天）
@@ -417,7 +438,7 @@ const RegisterPage = {
         </div>
 
         <div class="md:col-span-2 flex items-center gap-2 mt-2">
-          <Btn label="注册并登录" variant="primary" type="submit" />
+          <Btn :label="loading ? '注册中…' : '注册并登录'" variant="primary" type="submit" :disabled="loading"/>
           <router-link class="text-sm text-mint-700 dark:text-mint-300 hover:underline" to="/login">返回登录</router-link>
         </div>
       </form>
@@ -429,6 +450,13 @@ const RegisterPage = {
     const router = VueRouter.useRouter();
     const form = Vue.reactive({ username:"", password:"", reader_no:"", name:"", category_id:"" });
     const cats = Vue.ref([]);
+    const errMsg = Vue.ref("");
+    const loading = Vue.ref(false);
+
+    const pwdBytes = Vue.computed(() => {
+      try { return new TextEncoder().encode(form.password || "").length; }
+      catch { return (form.password || "").length; }
+    });
 
     Vue.onMounted(async () => {
       const res = await api.get("/api/reader-categories");
@@ -436,6 +464,23 @@ const RegisterPage = {
     });
 
     async function doRegister() {
+      errMsg.value = "";
+
+      // 基本校验
+      if (!form.username.trim()) return (errMsg.value = "请输入用户名");
+      if (!form.password) return (errMsg.value = "请输入密码");
+      if (!form.reader_no.trim()) return (errMsg.value = "请输入读者证号/学号");
+      if (!form.name.trim()) return (errMsg.value = "请输入姓名");
+      if (!form.category_id) return (errMsg.value = "请选择读者类别");
+
+      // ✅ 前端提前拦截 bcrypt 72 bytes
+      if (pwdBytes.value > 72) {
+        errMsg.value = "密码过长（超过 72 字节），请缩短或减少中文/emoji。";
+        toast(errMsg.value, "err");
+        return;
+      }
+
+      loading.value = true;
       try {
         const res = await api.post("/api/auth/register-reader", {
           ...form,
@@ -445,13 +490,18 @@ const RegisterPage = {
         toast("注册成功", "ok");
         router.push("/");
       } catch (e) {
-        toast(e?.response?.data?.detail || "注册失败", "err");
+        const msg = e?.response?.data?.detail || "注册失败";
+        errMsg.value = msg;        // ✅ 表单内提示
+        toast(msg, "err");         // ✅ toast 提示
+      } finally {
+        loading.value = false;
       }
     }
 
-    return { form, cats, doRegister };
+    return { form, cats, doRegister, errMsg, loading, pwdBytes };
   }
 };
+
 
 const HomePage = {
   template: `

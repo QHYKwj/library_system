@@ -96,6 +96,11 @@ def register_reader(data: S.RegisterReaderIn, db: Session = Depends(get_db)):
     if db.scalar(select(M.Reader).where(M.Reader.reader_no == data.reader_no)):
         raise HTTPException(status_code=400, detail="读者证号已存在")
 
+    # ✅ 关键修复：bcrypt 72 bytes 限制（按 UTF-8 字节）
+    pwd_bytes = (data.password or "").encode("utf-8")
+    if len(pwd_bytes) > 72:
+        raise HTTPException(status_code=400, detail="密码过长（bcrypt 限制最多 72 字节）。请缩短密码或避免大量中文/emoji。")
+
     r = M.Reader(
         category_id=data.category_id,
         reader_no=data.reader_no,
@@ -104,11 +109,11 @@ def register_reader(data: S.RegisterReaderIn, db: Session = Depends(get_db)):
         status="active",
     )
     db.add(r)
-    db.flush()  # get reader_id
+    db.flush()
 
     u = M.User(
         username=data.username,
-        password_hash=hash_password(data.password),
+        password_hash=hash_password(data.password),  # 现在不会炸了
         role="reader",
         reader_id=r.reader_id,
         status=1,
@@ -285,8 +290,8 @@ def create_copy(data: S.CopyIn, db: Session = Depends(get_db), user=Depends(requ
     db.commit()
     db.refresh(c)
 
-    pub_name = b.publisher.name if b.publisher else None
-    upsert_book(b, pub_name)
+    # pub_name = b.publisher.name if b.publisher else None
+    # upsert_book(b, pub_name)
     return c
 
 @app.put("/api/copies/{cid}", response_model=S.CopyOut)
@@ -310,9 +315,9 @@ def update_copy(cid: int, data: S.CopyIn, db: Session = Depends(get_db), user=De
 
     db.commit()
     db.refresh(c)
-    if b:
-        pub_name = b.publisher.name if b.publisher else None
-        upsert_book(b, pub_name)
+    # if b:
+    #     pub_name = b.publisher.name if b.publisher else None
+    #     upsert_book(b, pub_name)
     return c
 
 @app.delete("/api/copies/{cid}")
@@ -329,9 +334,9 @@ def delete_copy(cid: int, db: Session = Depends(get_db), user=Depends(require_ro
             b.available_copies -= 1
     db.delete(c)
     db.commit()
-    if b:
-        pub_name = b.publisher.name if b.publisher else None
-        upsert_book(b, pub_name)
+    # if b:
+    #     pub_name = b.publisher.name if b.publisher else None
+    #     upsert_book(b, pub_name)
     return {"ok": True}
 
 # --- borrow / return / fine / pay ---
